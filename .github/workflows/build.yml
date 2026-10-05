@@ -19,21 +19,32 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
+    # runner 上不自带 gradle 命令，用官方 action 装好并配置缓存
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '9.4.1'
+
+    # 注意：setup-android 没有 api-level 这个输入项（写了会被静默忽略），
+    # 必须通过 packages 显式指定。用 android-37.0（正式版，非 preview）。
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        api-level: 37 # 关键：强制安装 API 37
+        packages: 'platforms;android-37.0 platform-tools'
+
+    - name: Verify SDK 37 installed
+      run: |
+        echo "ANDROID_HOME=$ANDROID_HOME"
+        ls "$ANDROID_HOME/platforms"
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew || true
 
     - name: Generate Gradle Wrapper
-      run: |
-        # 因为项目没带 wrapper，先手动生成指定版本
-        gradle wrapper --gradle-version 9.4.1
+      run: gradle wrapper --gradle-version 9.4.1
 
     - name: Build Debug APK
-      run: ./gradlew :app:assembleDebug
+      run: ./gradlew :app:assembleDebug --stacktrace
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
