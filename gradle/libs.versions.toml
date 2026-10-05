@@ -1,0 +1,27 @@
+[versions]
+# --- 构建工具链（版本均经 Maven Central / Google Maven 实际校验存在）---
+agp = "9.4.1"
+kotlin = "2.4.20"
+composeMultiplatform = "1.12.1"
+androidxActivity = "1.13.0"
+
+# --- Miuix UI 库（Maven Central: top.yukonga.miuix.kmp）---
+miuix = "0.9.4"
+
+# --- Android SDK ---
+# 重要：miuix 0.9.4 的 aar-metadata.properties 中 minCompileSdk=37，
+# 因此 compileSdk 必须 >= 37，否则 Gradle 会直接报错拒绝构建。
+compileSdk = "37"
+minSdk = "26"
+targetSdk = "37"
+
+[libraries]
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }
+miuix-ui = { module = "top.yukonga.miuix.kmp:miuix-ui", version.ref = "miuix" }
+miuix-icons = { module = "top.yukonga.miuix.kmp:miuix-icons", version.ref = "miuix" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Miuix 自己管理 Compose 内部的配色，这里只需要一个不带 ActionBar 的
+      基础主题，避免启动时出现系统标题栏。
+    -->
+    <style name="Theme.RksCalculator" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>
