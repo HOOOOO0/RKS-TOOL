@@ -1,5 +1,7 @@
 [versions]
-# --- 构建工具链（版本均经 Maven Central / Google Maven 实际校验存在）---
+# --- 构建工具链（版本均经 Maven Central / Google Maven 实际校验）---
+# 注意：AGP 9.x 内置了 Kotlin 支持，不再需要 org.jetbrains.kotlin.android 插件。
+# 同时 AGP 9.4.1 需要 Gradle 9.8.0+（9.4.x 缺少 org.gradle.features.binding.ProjectTypeBinding）。
 agp = "9.4.1"
 kotlin = "2.4.20"
 composeMultiplatform = "1.12.1"
@@ -22,6 +24,6 @@ miuix-icons = { module = "top.yukonga.miuix.kmp:miuix-icons", version.ref = "miu
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+# Compose 编译器插件由 Kotlin 提供，AGP 9 下仍需显式应用
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }

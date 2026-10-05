@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    // AGP 9.0+ 内置 Kotlin 支持，不能再应用 org.jetbrains.kotlin.android，
+    // 否则报错：“The 'org.jetbrains.kotlin.android' plugin is no longer required for
+    //            Kotlin support since AGP 9.0.”
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.compose.multiplatform)
 }
@@ -37,6 +39,7 @@ android {
     }
 }
 
+// AGP 9 内置 Kotlin：直接用顶层 kotlin { } 配置编译选项
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
