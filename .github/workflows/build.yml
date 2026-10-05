@@ -23,7 +23,7 @@ jobs:
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@v4
       with:
-        gradle-version: '9.4.1'
+        gradle-version: '9.8.0'
 
     # 注意：setup-android 没有 api-level 这个输入项（写了会被静默忽略），
     # 必须通过 packages 显式指定。用 android-37.0（正式版，非 preview）。
@@ -41,7 +41,7 @@ jobs:
       run: chmod +x gradlew || true
 
     - name: Generate Gradle Wrapper
-      run: gradle wrapper --gradle-version 9.4.1
+      run: gradle wrapper --gradle-version 9.8.0
 
     - name: Build Debug APK
       run: ./gradlew :app:assembleDebug --stacktrace

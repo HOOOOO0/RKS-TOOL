@@ -48,7 +48,7 @@
 | 组件 | 版本 | 说明 |
 |---|---|---|
 | JDK | **17+** | |
-| Gradle | **9.4.1** | 与 AGP 9.4.1 配套 |
+| Gradle | **9.8.0** | AGP 9.4.1 需要 Gradle 9.8.0+（9.4.1 缺少 ProjectTypeBinding 类，会报 NoClassDefFoundError）|
 | Android Gradle Plugin | **9.4.1** | |
 | Kotlin | **2.4.20** | miuix 0.9.4 就是用这个版本编译的 |
 | Compose Multiplatform | **1.12.1** | miuix 0.9.4 依赖 Compose 1.12 |
@@ -65,7 +65,7 @@
 
 ```bash
 # 1. 生成 Gradle Wrapper（本仓库未附带 wrapper 二进制）
-gradle wrapper --gradle-version 9.4.1
+gradle wrapper --gradle-version 9.8.0
 
 # 2. 编译 Debug APK
 ./gradlew :app:assembleDebug
