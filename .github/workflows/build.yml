@@ -12,8 +12,6 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -21,36 +19,17 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    # runner 不自带 gradle 命令，用官方 action 装好并配置缓存
+    # runner 不自带 gradle 命令
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@v4
       with:
         gradle-version: '9.8.0'
 
-    # setup-android 没有 api-level 这个输入项，必须通过 packages 指定
+    # setup-android 没有 api-level 输入项，必须用 packages 指定
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
         packages: 'platforms;android-37.0 platform-tools'
-
-    - name: Verify SDK 37 installed
-      run: |
-        echo "ANDROID_HOME=$ANDROID_HOME"
-        ls "$ANDROID_HOME/platforms"
-
-    # 从 Secrets 还原固定签名密钥库。
-    # 不能在 step 的 if 里直接引用 secrets（GitHub 不允许），故用 env 中转。
-    - name: Decode keystore
-      env:
-        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      run: |
-        if [ -z "$KEYSTORE_BASE64" ]; then
-          echo "::warning::未配置 KEYSTORE_BASE64，本次用默认 debug 签名（签名每次都会变）"
-          exit 0
-        fi
-        echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-        echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-        echo "密钥库已还原：$(ls -l "$RUNNER_TEMP/release.jks" | awk '{print $5}') 字节"
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew || true
@@ -58,60 +37,25 @@ jobs:
     - name: Generate Gradle Wrapper
       run: gradle wrapper --gradle-version 9.8.0
 
-    # 用 git 提交数作为 versionCode，保证每次构建递增
-    - name: Compute version
-      run: |
-        CODE=$(git rev-list --count HEAD)
-        echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
-        echo "VERSION_NAME=1.0.$CODE" >> "$GITHUB_ENV"
-        echo "本次 versionCode=$CODE versionName=1.0.$CODE"
+    - name: Build Debug APK
+      run: ./gradlew :app:assembleDebug --stacktrace
 
-    # 有密钥库 -> 构建已签名的 release
-    # 没有密钥库 -> 回退构建 debug（debug 会自动签名，至少能装上）
-    - name: Build APK
-      env:
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      run: |
-        if [ -n "$KEYSTORE_PATH" ] && [ -f "$KEYSTORE_PATH" ]; then
-          echo "使用固定签名构建 release"
-          ./gradlew :app:assembleRelease --stacktrace
-        else
-          echo "::warning::无密钥库，回退构建 debug（签名会每次变化）"
-          ./gradlew :app:assembleDebug --stacktrace
-        fi
-
-    # AGP 9 的输出文件名可能与旧版不同，这里动态查找，避免写死路径
+    # AGP 9 输出名可能与旧版不同，动态查找避免写死路径
     - name: Locate APK
       id: locate
       run: |
-        echo "--- outputs 目录内容 ---"
         find app/build/outputs -type f -name '*.apk' -exec ls -l {} \;
         APK=$(find app/build/outputs -type f -name '*.apk' | head -1)
         if [ -z "$APK" ]; then
-          echo "::error::没有找到任何 APK 产物"
-          find app/build/outputs -type f | head -50
+          echo "::error::没有找到 APK 产物"
           exit 1
         fi
         echo "APK_PATH=$APK" >> "$GITHUB_ENV"
         echo "找到 APK：$APK"
 
-    # 打印签名指纹，直观确认「每次构建签名是否一致」
-    - name: Show APK signature
-      run: |
-        ls -l "$APK_PATH"
-        BT=$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | tail -1)
-        echo "build-tools: $BT"
-        if [ -x "$BT/apksigner" ]; then
-          "$BT/apksigner" verify --print-certs "$APK_PATH" || true
-        else
-          echo "apksigner 不可用，跳过指纹打印"
-        fi
-
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: RKS-Calculator-Release-APK
+        name: RKS-Calculator-Debug-APK
         path: ${{ env.APK_PATH }}
         if-no-files-found: error
