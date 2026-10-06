@@ -66,12 +66,21 @@ jobs:
         echo "VERSION_NAME=1.0.$CODE" >> "$GITHUB_ENV"
         echo "本次 versionCode=$CODE versionName=1.0.$CODE"
 
-    - name: Build Release APK
+    # 有密钥库 -> 构建已签名的 release
+    # 没有密钥库 -> 回退构建 debug（debug 会自动签名，至少能装上）
+    - name: Build APK
       env:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      run: ./gradlew :app:assembleRelease --stacktrace
+      run: |
+        if [ -n "$KEYSTORE_PATH" ] && [ -f "$KEYSTORE_PATH" ]; then
+          echo "使用固定签名构建 release"
+          ./gradlew :app:assembleRelease --stacktrace
+        else
+          echo "::warning::无密钥库，回退构建 debug（签名会每次变化）"
+          ./gradlew :app:assembleDebug --stacktrace
+        fi
 
     # AGP 9 的输出文件名可能与旧版不同，这里动态查找，避免写死路径
     - name: Locate APK
