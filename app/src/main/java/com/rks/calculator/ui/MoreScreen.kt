@@ -215,7 +215,14 @@ fun MoreScreen(appState: AppState) {
                 }
 
                 SaveReader.RootResult.FileNotFound ->
-                    appState.saveMessage = "没找到存档文件，可能游戏从未运行过"
+                    appState.saveMessage =
+                        "没找到存档文件。请确认：① 游戏已安装并运行过；" +
+                            "② 存档路径确实是 /data/user/0/com.PigeonGames.Phigros/shared_prefs/"
+
+                is SaveReader.RootResult.PermissionDenied ->
+                    appState.saveMessage =
+                        "找到存档了，但读取被拒绝（SELinux 或 su 权限不足）。\n" +
+                            "请改用「手动选择已解密的存档」。"
 
                 is SaveReader.RootResult.Error ->
                     appState.saveMessage = "读取失败：${result.message}"

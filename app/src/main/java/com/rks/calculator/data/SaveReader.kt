@@ -69,6 +69,10 @@ object SaveReader {
         data class Success(val xml: String, val path: String) : RootResult
         data object NoRoot : RootResult
         data object FileNotFound : RootResult
+
+        /** 文件存在，但被 SELinux 或 su 权限拒绝。 */
+        data class PermissionDenied(val detail: String) : RootResult
+
         data class Error(val message: String) : RootResult
     }
 
@@ -200,7 +204,14 @@ object SaveReader {
 
     fun hasRoot(): Boolean = findSu() != null
 
-    /** 用 root 读取存档。 */
+    /**
+     * 用 root 读取存档。
+     *
+     * 会区分三种失败情形，便于界面给出准确提示：
+     *  - 文件不存在（游戏没装 / 没运行过）
+     *  - 文件存在但读取被拒（SELinux 或 su 权限不足）
+     *  - 其它错误
+     */
     fun readWithRoot(): RootResult {
         AppLog.i("SaveReader", "尝试 root 读取")
         val su = findSu() ?: run {
@@ -209,24 +220,64 @@ object SaveReader {
         }
         AppLog.i("SaveReader", "找到 su：$su")
 
+        var sawFileButDenied = false
+        var lastError: String? = null
+
         for (path in CANDIDATE_PATHS) {
             AppLog.i("SaveReader", "尝试路径：$path")
-            val text = runCatching {
-                val p = ProcessBuilder(su, "-c", "cat \"$path\"")
+
+            // 先探测文件是否存在（ls 的错误信息能区分 不存在 / 无权限）
+            val lsOut = runCatching {
+                val p = ProcessBuilder(su, "-c", "ls -l \"$path\" 2>&1")
+                    .redirectErrorStream(true).start()
+                val out = p.inputStream.bufferedReader().readText().trim()
+                p.waitFor(8, TimeUnit.SECONDS)
+                out
+            }.getOrDefault("")
+
+            val exists = lsOut.contains("playerprefs") && !lsOut.contains("No such file")
+            AppLog.i("SaveReader", "ls 结果：${lsOut.take(160)}")
+
+            if (!exists) {
+                if (lsOut.contains("Permission denied", ignoreCase = true)) {
+                    sawFileButDenied = true
+                }
+                continue
+            }
+
+            // cat 读取
+            val catResult = runCatching {
+                val p = ProcessBuilder(su, "-c", "cat \"$path\" 2>&1")
                     .redirectErrorStream(true).start()
                 val out = p.inputStream.bufferedReader().readText()
-                val done = p.waitFor(15, TimeUnit.SECONDS)
+                val done = p.waitFor(20, TimeUnit.SECONDS)
                 if (!done) { p.destroy(); return@runCatching null }
-                if (p.exitValue() == 0 && out.contains("<map")) out else null
+                Triple(p.exitValue(), out, p.exitValue() == 0)
             }.getOrNull()
 
-            if (text != null) {
-                AppLog.i("SaveReader", "读取成功：$path，长度=${text.length}")
-                return RootResult.Success(text, path)
+            if (catResult == null) {
+                lastError = "读取超时"
+                continue
             }
-            AppLog.w("SaveReader", "该路径读取失败：$path")
+
+            val (code, output, ok) = catResult
+            if (ok && output.contains("<map")) {
+                AppLog.i("SaveReader", "读取成功：$path，长度=${output.length}")
+                return RootResult.Success(output, path)
+            }
+
+            // 失败：判断是不是权限问题
+            if (output.contains("Permission denied", ignoreCase = true) || code != 0) {
+                sawFileButDenied = true
+                lastError = output.take(200)
+                AppLog.w("SaveReader", "读取被拒：$path  code=$code  ${output.take(120)}")
+            }
         }
-        AppLog.w("SaveReader", "所有候选路径均失败")
-        return RootResult.FileNotFound
+
+        return when {
+            sawFileButDenied -> RootResult.PermissionDenied(lastError ?: "Permission denied")
+            lastError != null -> RootResult.Error(lastError)
+            else -> RootResult.FileNotFound
+        }
     }
 }

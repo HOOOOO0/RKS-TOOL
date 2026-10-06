@@ -63,10 +63,23 @@ object SaveParser {
     )
 
     // key 形如：歌名.曲师.0.Record.HD
-    private val RECORD_RE = Regex(
-        """<string\s+name="([^"]+?)\.Record\.(EZ|HD|IN|AT)">(\{[^}]*})</string>""",
-        RegexOption.IGNORE_CASE,
-    )
+    //
+    // 注意：花括号必须写成字符类 [{] [}]，**不能**写成 \{ \}。
+    // Android 使用 ICU 正则引擎，它对转义花括号的处理与 Oracle JDK 不同，
+    // 写成 \{ 会在 Android 上抛 PatternSyntaxException（曾导致启动即闪退）。
+    //
+    // 用 lazy + runCatching 包住，保证即使正则本身有问题也只是返回 null，
+    // 而不会在类初始化阶段抛出 ExceptionInInitializerError 直接崩溃。
+    private val RECORD_RE: Regex? by lazy {
+        runCatching {
+            Regex(
+                """<string\s+name="([^"]+?)\.Record\.(EZ|HD|IN|AT)">([{][^}]*[}])</string>""",
+                RegexOption.IGNORE_CASE,
+            )
+        }.onFailure {
+            AppLog.e("SaveParser", "成绩正则编译失败（这会导致无法解析存档）", it)
+        }.getOrNull()
+    }
 
     /**
      * 解析解密后的存档文本。
@@ -81,7 +94,13 @@ object SaveParser {
         val records = ArrayList<Record>(512)
         val unmatched = LinkedHashSet<String>()
 
-        for (m in RECORD_RE.findAll(xml)) {
+        val regex = RECORD_RE
+        if (regex == null) {
+            AppLog.e("SaveParser", "成绩正则不可用，无法解析")
+            return Result(records = emptyList(), matched = 0, unmatchedIds = emptyList())
+        }
+
+        for (m in regex.findAll(xml)) {
             val rawKey = unescapeXml(m.groupValues[1])
             val difficulty = m.groupValues[2].uppercase()
             val json = m.groupValues[3]
@@ -126,7 +145,7 @@ object SaveParser {
     }
 
     /** 存档是否像是「已解密」的。 */
-    fun looksDecrypted(xml: String): Boolean = RECORD_RE.containsMatchIn(xml)
+    fun looksDecrypted(xml: String): Boolean = RECORD_RE?.containsMatchIn(xml) == true
 
     /** 还原 xml 实体（`&amp;` → `&` 等）。 */
     private fun unescapeXml(s: String): String = s
