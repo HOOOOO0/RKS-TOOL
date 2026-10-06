@@ -1,5 +1,7 @@
 package com.rks.calculator.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,11 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -34,47 +32,59 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 更多页：
  *  1. 读取存档（root 直读 / 手动选择解密后的文件）
- *  2. B30 计算（用存档数据 / 用手动录入数据）
+ *  2. B30 计算（用存档数据 / 用首页记录数据）
+ *
+ * 注意：对话框不在这里渲染，统一由 [RksApp] 挂载，
+ * 避免页面切换动画销毁子树导致崩溃。
  */
 @Composable
 fun MoreScreen(appState: AppState) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // 弹窗状态
-    var showDecryptGuide by remember { mutableStateOf(false) }
-    var showSaveDetail by remember { mutableStateOf(false) }
-    var pendingPickFile by remember { mutableStateOf(false) }
-
-    // 系统文件选择器
-    val filePicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val text = withContext(Dispatchers.IO) {
-                    SaveReader.readFromUri(context, uri)
-                }
-                if (text.isNullOrBlank()) {
-                    appState.saveMessage = "读取文件失败"
-                } else if (!SaveParser.looksDecrypted(text)) {
-                    appState.saveMessage = "这个文件看起来还是加密的，请先在 PhiCrypto 解密后再选择"
-                    showDecryptGuide = true
-                } else {
-                    val result = withContext(Dispatchers.Default) {
-                        SaveParser.parse(context, text)
+    // 处理读到的存档文本（统一入口，任何异常都在这里兜住）
+    fun handleSaveText(text: String?, source: String) {
+        if (text.isNullOrBlank()) {
+            appState.saveMessage = "读取文件失败（内容为空）"
+            return
+        }
+        if (!SaveParser.looksDecrypted(text)) {
+            appState.saveMessage = "这个文件还是加密的"
+            appState.showDecryptGuide = true
+            return
+        }
+        // 解析过程整体包一层，任何异常都转成提示而不是崩溃
+        val outcome = runCatching { SaveParser.parse(context, text) }
+        outcome.fold(
+            onSuccess = { result ->
+                appState.saveRecords = result.records
+                appState.saveSource = source
+                appState.saveLoaded = true
+                appState.b30FromSave = B30Calculator.calculate(result.records)
+                appState.saveMessage = buildString {
+                    append("读取成功：").append(result.records.size).append(" 条成绩")
+                    if (result.unmatchedIds.isNotEmpty()) {
+                        append("，").append(result.unmatchedIds.size).append(" 首未匹配定数")
                     }
-                    appState.saveRecords = result.records
-                    appState.saveSource = uri.lastPathSegment ?: "已选择的文件"
-                    appState.saveLoaded = true
-                    appState.b30FromSave = B30Calculator.calculate(result.records)
-                    appState.saveMessage = "读取成功：${result.records.size} 条成绩" +
-                        if (result.unmatchedIds.isNotEmpty()) {
-                            "，其中 ${result.unmatchedIds.size} 首未匹配到定数"
-                        } else {
-                            ""
-                        }
                 }
+            },
+            onFailure = { e ->
+                appState.saveMessage = "解析失败：${e.message ?: e.javaClass.simpleName}"
+            },
+        )
+    }
+
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) {
+            appState.saveMessage = "没有选择文件"
+        } else {
+            scope.launch {
+                val text = runCatching {
+                    withContext(Dispatchers.IO) { SaveReader.readFromUri(context, uri) }
+                }.getOrNull()
+                handleSaveText(text, uri.lastPathSegment ?: "已选择的文件")
             }
         }
     }
@@ -106,33 +116,22 @@ fun MoreScreen(appState: AppState) {
                 onClick = {
                     appState.saveMessage = "正在读取…"
                     scope.launch {
-                        val result = withContext(Dispatchers.IO) { SaveReader.readWithRoot() }
+                        val result = runCatching {
+                            withContext(Dispatchers.IO) { SaveReader.readWithRoot() }
+                        }.getOrElse { SaveReader.RootResult.Error(it.message ?: "未知错误") }
+
                         when (result) {
-                            is SaveReader.RootResult.Success -> {
-                                if (!SaveParser.looksDecrypted(result.xml)) {
-                                    // 读到了，但是加密的 → 引导去解密
-                                    appState.saveMessage = "存档已读取，但内容是加密的"
-                                    showDecryptGuide = true
-                                } else {
-                                    val parsed = withContext(Dispatchers.Default) {
-                                        SaveParser.parse(context, result.xml)
-                                    }
-                                    appState.saveRecords = parsed.records
-                                    appState.saveSource = result.path
-                                    appState.saveLoaded = true
-                                    appState.b30FromSave = B30Calculator.calculate(parsed.records)
-                                    appState.saveMessage = "读取成功：${parsed.records.size} 条成绩"
-                                }
-                            }
+                            is SaveReader.RootResult.Success ->
+                                handleSaveText(result.xml, result.path)
 
                             SaveReader.RootResult.NoRoot -> {
                                 appState.saveMessage = "未检测到 root 权限"
-                                showDecryptGuide = true
+                                appState.showDecryptGuide = true
                             }
 
-                            SaveReader.RootResult.FileNotFound -> {
-                                appState.saveMessage = "未找到存档文件（可能没玩过，或路径不同）"
-                            }
+                            SaveReader.RootResult.FileNotFound ->
+                                appState.saveMessage =
+                                    "未找到存档文件。可能路径不同，或游戏从未运行过。"
 
                             is SaveReader.RootResult.Error ->
                                 appState.saveMessage = "读取失败：${result.message}"
@@ -147,6 +146,14 @@ fun MoreScreen(appState: AppState) {
             TextButton(
                 text = "手动选择已解密的存档",
                 onClick = { filePicker.launch(arrayOf("*/*")) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            TextButton(
+                text = "存档是加密的？点这里查看解密方法",
+                onClick = { appState.showDecryptGuide = true },
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -187,18 +194,18 @@ fun MoreScreen(appState: AppState) {
             insideMargin = PaddingValues(16.dp),
         ) {
             Text(
-                text = "27 首最高 RKS + 3 首满分，除以 30",
+                text = "27 首最高 RKS ＋ 3 首满分，除以 30（分母固定为 30）",
                 fontSize = 13.sp,
                 color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
             )
             Spacer(Modifier.height(14.dp))
 
             // --- 用存档算 ---
-            val saveResult = appState.b30FromSave
             Text(text = "用存档数据计算", fontSize = 14.sp)
             Spacer(Modifier.height(8.dp))
+            val saveResult = appState.b30FromSave
             if (saveResult != null) {
-                B30ResultView(saveResult, onDetail = { showSaveDetail = true })
+                B30ResultView(saveResult, onDetail = { appState.showB30Detail = true })
             } else {
                 Text(
                     text = if (appState.saveLoaded) "点下面的按钮计算" else "请先在上方读取存档",
@@ -209,7 +216,8 @@ fun MoreScreen(appState: AppState) {
                 TextButton(
                     text = "计算 B30",
                     onClick = {
-                        appState.b30FromSave = B30Calculator.calculate(appState.saveRecords)
+                        appState.b30FromSave =
+                            B30Calculator.calculate(appState.saveRecords)
                     },
                     enabled = appState.saveLoaded && appState.saveRecords.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
@@ -218,7 +226,7 @@ fun MoreScreen(appState: AppState) {
 
             Spacer(Modifier.height(18.dp))
 
-            // --- 用手动录入算 ---
+            // --- 用首页记录算 ---
             Text(text = "用首页记录的数据计算", fontSize = 14.sp)
             Spacer(Modifier.height(8.dp))
             Text(
@@ -230,7 +238,6 @@ fun MoreScreen(appState: AppState) {
             TextButton(
                 text = "用首页数据算 B30",
                 onClick = {
-                    // 把手动录入转换为存档记录格式（无分数则视为非满分）
                     val asRecords = appState.songEntries.map { e ->
                         SaveParser.Record(
                             id = e.song.ifBlank { "手动录入" },
@@ -257,21 +264,9 @@ fun MoreScreen(appState: AppState) {
 
         Spacer(Modifier.height(24.dp))
     }
-
-    // ---------------- 弹窗 ----------------
-
-    if (showDecryptGuide) {
-        DecryptGuideDialog(onDismiss = { showDecryptGuide = false })
-    }
-
-    if (showSaveDetail) {
-        appState.b30FromSave?.let {
-            B30DetailDialog(result = it, onDismiss = { showSaveDetail = false })
-        }
-    }
 }
 
-/** B30 结果的小卡片展示。 */
+/** B30 结果小卡片。 */
 @Composable
 private fun B30ResultView(
     result: B30Calculator.Result,

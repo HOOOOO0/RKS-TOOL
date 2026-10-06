@@ -36,6 +36,7 @@ fun DecryptGuideDialog(onDismiss: () -> Unit) {
 
     OverlayDialog(
         show = true,
+        renderInRootScaffold = false,
         title = "存档是加密的",
         summary = "Phigros 的原始存档（playerprefs.xml）字段名和数据都是密文，" +
             "本工具无法直接读取。请先用在线工具解密，再回来选择解密后的文件。",
@@ -116,6 +117,7 @@ fun B30DetailDialog(
 ) {
     OverlayDialog(
         show = true,
+        renderInRootScaffold = false,
         title = "B30 入选歌曲",
         summary = "B30 = ${formatNumber(result.b30)}（共 ${result.divisor} 首参与计算）",
         onDismissRequest = onDismiss,

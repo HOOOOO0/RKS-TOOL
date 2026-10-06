@@ -99,13 +99,14 @@ fun AboutScreen() {
                 "① 算出存档中每首歌的单曲 RKS",
                 "② 排序，取最高的 27 首",
                 "③ 把所有满分（1000000 分）的歌单独排序，取最高的 3 首",
-                "④ 把这 27 首与这 3 首的 RKS 相加，除以 30",
+                "④ 把这 27 首与这 3 首的 RKS 相加，除以 30（分母固定 30，与数据条数无关）",
             ).forEach {
                 Text(text = it, fontSize = 13.sp)
                 Spacer(Modifier.height(8.dp))
             }
             Text(
-                text = "满分歌的 ACC 为 100%，代入公式后 RKS 在数值上等于定数。",
+                text = "满分歌的 ACC 为 100%，代入公式后 RKS 在数值上等于定数。\n" +
+                    "两个列表相互独立：一首满分歌若同时进入前 27 名，会被计入两次。",
                 fontSize = 12.sp,
                 color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
             )

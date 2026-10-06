@@ -51,6 +51,14 @@ class AppState {
     /** 手动录入的成绩。 */
     val manualRecords = mutableStateListOf<AppJson.SongEntry>()
 
+    // ---------- 对话框可见性（放在 AppState 里，避免页面切换时被销毁） ----------
+
+    /** 是否显示「存档已加密」引导弹窗。 */
+    var showDecryptGuide by mutableStateOf(false)
+
+    /** 是否显示 B30 明细弹窗。 */
+    var showB30Detail by mutableStateOf(false)
+
     /** 把一条计算结果加入导出列表（去重：同定数同 ACC 只留一条）。 */
     fun addEntry(entry: AppJson.SongEntry) {
         val exists = songEntries.any { it.level == entry.level && it.acc == entry.acc }

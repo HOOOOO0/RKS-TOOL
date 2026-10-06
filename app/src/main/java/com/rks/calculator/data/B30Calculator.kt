@@ -49,7 +49,7 @@ object B30Calculator {
         val perfectSum: Double,
         /** 最终 B30。 */
         val b30: Double,
-        /** 实际使用的分母（成绩不足时为实际数量，避免虚低）。 */
+        /** 分母，固定为 30。 */
         val divisor: Int,
         /** 参与计算的有效成绩总数。 */
         val validCount: Int,
@@ -83,12 +83,10 @@ object B30Calculator {
         val bestSum = best.sumOf { it.rks }
         val perfectSum = perfects.sumOf { it.rks }
 
-        // 分母：标准 30；若玩家成绩太少（两个列表加起来都不够 30），
-        // 用实际数量，否则新玩家会得到虚低的数值。
-        val achievable = best.size + perfects.size
-        val divisor = if (achievable >= TOTAL_SLOTS) TOTAL_SLOTS else achievable
-
-        val b30 = if (divisor == 0) 0.0 else (bestSum + perfectSum) / divisor
+        // 分母固定为 30：不管实际有几条数据，一律除以 30。
+        // 例如只有 28 条（1 首满分 + 27 首普通），或者只有 1 条，分母也还是 30。
+        val divisor = TOTAL_SLOTS
+        val b30 = (bestSum + perfectSum) / divisor
 
         return Result(
             best = best,

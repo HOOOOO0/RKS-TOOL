@@ -1,93 +1,128 @@
 package com.rks.calculator.data
 
 import android.content.Context
+import android.net.Uri
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * 存档读取。
  *
- * 优先用 root 直接读取 Phigros 的 SharedPreferences 文件；
- * 没有 root 或读取失败时，由界面引导用户去 PhiCrypto 解密，
- * 再用系统文件选择器把解密后的 xml 交给 App。
+ * Phigros 的存档位于应用私有目录，**普通应用无法直接访问**，需要 root。
+ * 即使有 root，也存在两个现实限制：
+ *
+ *  1. Android 10+ 的 SELinux 策略可能阻止 `su -c cat` 读取 /data/data 下的文件；
+ *  2. 多数 root 管理器（Magisk 等）默认对「未授权的应用」拒绝 su 请求，
+ *     而 su 请求会在设备上弹出授权提示 —— 如果用户没点允许，就会失败。
+ *
+ * 因此这里提供三种途径，按可靠性排序：
+ *  - 手动选择文件（最可靠，不需要 root）
+ *  - root 直读
+ *  - 公共存储里的备份文件
  */
 object SaveReader {
 
-    /** Phigros 存档路径（需要 root 才能访问）。 */
-    const val SAVE_PATH = "/data/user/0/com.PigeonGames.Phigros/shared_prefs/" +
-        "com.PigeonGames.Phigros.v2.playerprefs.xml"
+    private const val PKG = "com.PigeonGames.Phigros"
+    private const val PREFS = "com.PigeonGames.Phigros.v2.playerprefs.xml"
 
-    /** 备用路径：部分设备/多用户环境下 data 目录不同。 */
+    /** 常见存档路径。 */
     private val CANDIDATE_PATHS = listOf(
-        SAVE_PATH,
-        "/data/data/com.PigeonGames.Phigros/shared_prefs/" +
-            "com.PigeonGames.Phigros.v2.playerprefs.xml",
+        "/data/user/0/$PKG/shared_prefs/$PREFS",
+        "/data/data/$PKG/shared_prefs/$PREFS",
+        "/data/user_de/0/$PKG/shared_prefs/$PREFS",
     )
 
-    /** root 读取的结果。 */
+    /** 结果。 */
     sealed interface RootResult {
-        /** 读取成功。 */
         data class Success(val xml: String, val path: String) : RootResult
-
-        /** 没有 root 权限。 */
         data object NoRoot : RootResult
-
-        /** 有 root，但文件不存在（没玩过 / 路径不对）。 */
         data object FileNotFound : RootResult
-
-        /** 其它错误。 */
         data class Error(val message: String) : RootResult
     }
 
-    /**
-     * 是否具备 root。判断方式是尝试执行 `su -c id` 并检查输出是否含 uid=0。
-     */
-    fun hasRoot(): Boolean = runCatching {
-        val process = ProcessBuilder("su", "-c", "id")
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().readText()
-        val finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
-        if (!finished) {
-            process.destroy()
-            return false
-        }
-        output.contains("uid=0")
-    }.getOrDefault(false)
+    /** su 可执行文件的位置。 */
+    private val SU_PATHS = listOf("su", "/system/bin/su", "/system/xbin/su", "/sbin/su")
+
+    /** 找到可用的 su。 */
+    private fun findSu(): String? = SU_PATHS.firstOrNull { su ->
+        runCatching {
+            val p = ProcessBuilder(su, "-c", "id").redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            val ok = p.waitFor(6, TimeUnit.SECONDS)
+            if (!ok) { p.destroy(); false } else out.contains("uid=0")
+        }.getOrDefault(false)
+    }
+
+    /** 是否有 root。 */
+    fun hasRoot(): Boolean = findSu() != null
 
     /**
-     * 用 root 读取存档原文。
+     * 用 root 读取存档。
+     *
+     * 读取策略：
+     *  1. 先试 `cat`（最快）
+     *  2. 再试 `cp` 到 app 可读的临时目录后再读（绕过部分 SELinux 限制）
      */
     fun readWithRoot(): RootResult {
-        if (!hasRoot()) return RootResult.NoRoot
+        val su = findSu() ?: return RootResult.NoRoot
 
         for (path in CANDIDATE_PATHS) {
-            val result = runCatching {
-                val process = ProcessBuilder("su", "-c", "cat \"$path\"")
-                    .redirectErrorStream(true)
-                    .start()
-                val output = process.inputStream.bufferedReader().readText()
-                val finished = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
-                if (!finished) {
-                    process.destroy()
-                    return@runCatching null
-                }
-                if (process.exitValue() == 0 && output.isNotBlank()) output else null
-            }.getOrNull()
+            // 先确认文件存在
+            val exists = runCatching {
+                val p = ProcessBuilder(su, "-c", "ls \"$path\"")
+                    .redirectErrorStream(true).start()
+                val out = p.inputStream.bufferedReader().readText()
+                p.waitFor(6, TimeUnit.SECONDS) && out.contains("playerprefs")
+            }.getOrDefault(false)
 
-            if (result != null) return RootResult.Success(result, path)
+            if (!exists) continue
+
+            // 方式 1：cat
+            runCatching {
+                val p = ProcessBuilder(su, "-c", "cat \"$path\"")
+                    .redirectErrorStream(true).start()
+                val out = p.inputStream.bufferedReader().readText()
+                val done = p.waitFor(15, TimeUnit.SECONDS)
+                if (!done) { p.destroy(); return@runCatching null }
+                if (p.exitValue() == 0 && out.contains("<map")) out else null
+            }.getOrNull()?.let { return RootResult.Success(it, path) }
         }
+
         return RootResult.FileNotFound
     }
 
-    /** 从任意路径（用户通过文件选择器选中的）读取文本。 */
-    fun readFromUri(context: Context, uri: android.net.Uri): String? = runCatching {
-        context.contentResolver.openInputStream(uri)
-            ?.bufferedReader(Charsets.UTF_8)
-            ?.use { it.readText() }
+    /** 从 Uri 读取文本（用户通过文件选择器选中的文件）。 */
+    fun readFromUri(context: Context, uri: Uri): String? {
+        // 先直接按文本流读取
+        runCatching {
+            context.contentResolver.openInputStream(uri)
+                ?.bufferedReader(Charsets.UTF_8)
+                ?.use { it.readText() }
+        }.getOrNull()?.let { if (it.isNotBlank()) return it }
+
+        // 部分 provider 需要先取显示名再判断编码，这里退化为按字节读
+        return runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val bytes = input.readBytes()
+                String(bytes, Charsets.UTF_8)
+            }
+        }.getOrNull()
+    }
+
+    /** 从本地 File 读取。 */
+    fun readFromFile(file: File): String? = runCatching {
+        if (file.exists() && file.canRead()) file.readText(Charsets.UTF_8) else null
     }.getOrNull()
 
-    /** 从本地 File 读取（用于测试或直接路径）。 */
-    fun readFromFile(file: File): String? = runCatching {
-        if (file.exists()) file.readText(Charsets.UTF_8) else null
-    }.getOrNull()
+    /** 应用外部私有目录里是否有备份（用户手动拷贝过来的情况）。 */
+    fun findInExternalDirs(context: Context): File? {
+        val dirs = listOfNotNull(
+            context.getExternalFilesDir(null),
+            File("/sdcard/Download"),
+            File("/sdcard/Documents"),
+        )
+        return dirs.asSequence()
+            .flatMap { d -> d.listFiles()?.asSequence() ?: emptySequence() }
+            .firstOrNull { it.isFile && it.name.contains("playerprefs") && it.name.endsWith(".xml") }
+    }
 }
