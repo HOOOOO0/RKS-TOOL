@@ -39,14 +39,13 @@ jobs:
         ls "$ANDROID_HOME/platforms"
 
     # 从 Secrets 还原固定签名密钥库。
-    # 注意：不能在 step 的 if 条件里直接引用 secrets（GitHub 不允许），
-    # 所以通过 env 中转，在脚本内部判断是否为空。
+    # 不能在 step 的 if 里直接引用 secrets（GitHub 不允许），故用 env 中转。
     - name: Decode keystore
       env:
         KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
       run: |
         if [ -z "$KEYSTORE_BASE64" ]; then
-          echo "::warning::未配置 KEYSTORE_BASE64，本次将使用默认 debug 签名（签名每次都会变）"
+          echo "::warning::未配置 KEYSTORE_BASE64，本次用默认 debug 签名（签名每次都会变）"
           exit 0
         fi
         echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
@@ -60,7 +59,6 @@ jobs:
       run: gradle wrapper --gradle-version 9.8.0
 
     # 用 git 提交数作为 versionCode，保证每次构建递增
-    # （覆盖安装要求新包 versionCode >= 旧包）
     - name: Compute version
       run: |
         CODE=$(git rev-list --count HEAD)
@@ -75,17 +73,36 @@ jobs:
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: ./gradlew :app:assembleRelease --stacktrace
 
-    # 打印签名指纹，方便直观确认「每次构建签名是否一致」
+    # AGP 9 的输出文件名可能与旧版不同，这里动态查找，避免写死路径
+    - name: Locate APK
+      id: locate
+      run: |
+        echo "--- outputs 目录内容 ---"
+        find app/build/outputs -type f -name '*.apk' -exec ls -l {} \;
+        APK=$(find app/build/outputs -type f -name '*.apk' | head -1)
+        if [ -z "$APK" ]; then
+          echo "::error::没有找到任何 APK 产物"
+          find app/build/outputs -type f | head -50
+          exit 1
+        fi
+        echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+        echo "找到 APK：$APK"
+
+    # 打印签名指纹，直观确认「每次构建签名是否一致」
     - name: Show APK signature
       run: |
-        APK=app/build/outputs/apk/release/app-release.apk
-        ls -l "$APK"
-        BT=$(ls -d "$ANDROID_HOME"/build-tools/* | tail -1)
-        "$BT/apksigner" verify --print-certs "$APK" || true
+        ls -l "$APK_PATH"
+        BT=$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | tail -1)
+        echo "build-tools: $BT"
+        if [ -x "$BT/apksigner" ]; then
+          "$BT/apksigner" verify --print-certs "$APK_PATH" || true
+        else
+          echo "apksigner 不可用，跳过指纹打印"
+        fi
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: RKS-Calculator-Release-APK
-        path: app/build/outputs/apk/release/app-release.apk
+        path: ${{ env.APK_PATH }}
         if-no-files-found: error
