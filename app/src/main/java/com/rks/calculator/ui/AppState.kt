@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.rks.calculator.data.AppJson
 import com.rks.calculator.data.B30Calculator
+import com.rks.calculator.data.SaveHistory
 import com.rks.calculator.data.SaveParser
 import com.rks.calculator.util.AppLog
 
@@ -59,6 +60,19 @@ class AppState {
     /** 手动录入的成绩。 */
     val manualRecords = mutableStateListOf<AppJson.SongEntry>()
 
+    // ---------- 存档历史 ----------
+
+    /** 历史列表（最新的在前）。 */
+    var history by mutableStateOf<List<SaveHistory.Entry>>(emptyList())
+
+    /** 是否正在显示历史面板。 */
+    var showHistory by mutableStateOf(false)
+
+    /** 刷新历史列表。 */
+    fun refreshHistory(context: Context) {
+        history = SaveHistory.list(context)
+    }
+
     // ---------- 对话框可见性 ----------
 
     /** 是否显示「存档已加密」引导弹窗。 */
@@ -69,8 +83,17 @@ class AppState {
 
     // ---------- 导出 ----------
 
-    /** 待写入的 JSON 内容。 */
+    /** 当前存档的 xml 原文（读到时保存，用于导出）。 */
+    var currentXml: String? = null
+
+    /** 当前存档对应的历史 id（若有）。 */
+    var currentHistoryId: String? = null
+
+    /** 待写出的内容（xml 或 JSON）。 */
     var pendingExportPayload: String? = null
+
+    /** 待导出文件的建议名。 */
+    var pendingExportName: String = "export.xml"
 
     /** 置为 true 时，界面会拉起系统「另存为」选择器。 */
     var requestExportLocation by mutableStateOf(false)
@@ -82,6 +105,7 @@ class AppState {
         val result = b30FromSave ?: return
         AppLog.i("AppState", "请求导出，入选 ${result.best.size} 首")
         pendingExportPayload = buildExportJson(result)
+        pendingExportName = "rks_b30_${System.currentTimeMillis()}.json"
         requestExportLocation = true
     }
 
@@ -127,6 +151,29 @@ class AppState {
     private fun escape(s: String): String = s
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
+
+    /**
+     * 请求导出存档 xml 原文。
+     *
+     * @param xml 要导出的内容
+     * @param name 建议的文件名
+     */
+    fun requestExportXml(xml: String, name: String) {
+        AppLog.i("AppState", "请求导出存档 xml，长度=${xml.length}，文件名=$name")
+        pendingExportPayload = xml
+        pendingExportName = name
+        requestExportLocation = true
+    }
+
+    /** 请求导出当前存档（若有）。 */
+    fun exportCurrentSave(context: Context) {
+        val xml = SaveHistory.readXml(context, currentHistoryId ?: "") ?: currentXml
+        if (xml.isNullOrBlank()) {
+            saveMessage = "没有可导出的存档原文（可能来自手动解析的数据）"
+            return
+        }
+        requestExportXml(xml, "phigros_save_${System.currentTimeMillis()}.xml")
+    }
 
     /** 把一条计算结果加入导出列表（去重：同定数同 ACC 只留一条）。 */
     fun addEntry(entry: AppJson.SongEntry) {

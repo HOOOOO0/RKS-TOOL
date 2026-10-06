@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rks.calculator.data.B30Calculator
+import com.rks.calculator.data.SaveHistory
 import com.rks.calculator.data.SaveParser
 import com.rks.calculator.data.SaveReader
 import com.rks.calculator.util.AppLog
@@ -47,6 +49,11 @@ fun MoreScreen(appState: AppState) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // 首次进入时刷新历史列表
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        appState.refreshHistory(context)
+    }
+
     // ---------- 权限申请 ----------
 
     val runtimePermLauncher = rememberLauncherForActivityResult(
@@ -65,7 +72,7 @@ fun MoreScreen(appState: AppState) {
     // ---------- 选择导出位置（另存为） ----------
 
     val exportLocationPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json"),
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
         if (uri == null) {
             appState.saveMessage = "已取消导出"
@@ -114,12 +121,27 @@ fun MoreScreen(appState: AppState) {
                     onSuccess = { parsed ->
                         state.saveRecords = parsed.records
                         state.saveLoaded = true
-                        state.b30FromSave = B30Calculator.calculate(parsed.records)
+                        state.currentXml = result.xml
+                        val b30 = B30Calculator.calculate(parsed.records)
+                        state.b30FromSave = b30
+
+                        // 存一条历史
+                        val entry = SaveHistory.add(
+                            context = ctx,
+                            source = result.source,
+                            xml = result.xml,
+                            records = parsed.records,
+                            b30 = b30.b30,
+                        )
+                        state.currentHistoryId = entry?.id
+                        state.refreshHistory(ctx)
+
                         state.saveMessage = buildString {
                             append("读取成功：").append(parsed.records.size).append(" 条成绩")
                             if (parsed.unmatchedIds.isNotEmpty()) {
                                 append("，").append(parsed.unmatchedIds.size).append(" 首未匹配定数")
                             }
+                            append("（已存入历史）")
                         }
                     },
                     onFailure = { e ->
@@ -198,8 +220,19 @@ fun MoreScreen(appState: AppState) {
                             onSuccess = { parsed ->
                                 appState.saveRecords = parsed.records
                                 appState.saveLoaded = true
-                                appState.b30FromSave = B30Calculator.calculate(parsed.records)
-                                appState.saveMessage = "读取成功：${parsed.records.size} 条成绩"
+                                appState.currentXml = result.xml
+                                val b30 = B30Calculator.calculate(parsed.records)
+                                appState.b30FromSave = b30
+                                val entry = SaveHistory.add(
+                                    context = context,
+                                    source = result.path,
+                                    xml = result.xml,
+                                    records = parsed.records,
+                                    b30 = b30.b30,
+                                )
+                                appState.currentHistoryId = entry?.id
+                                appState.refreshHistory(context)
+                                appState.saveMessage = "读取成功：${parsed.records.size} 条成绩（已存入历史）"
                             },
                             onFailure = { e ->
                                 AppLog.e("MoreScreen", "解析失败", e)
@@ -345,14 +378,121 @@ fun MoreScreen(appState: AppState) {
                     color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                 )
                 Spacer(Modifier.height(10.dp))
+
+                // 导出当前存档的原始 xml
                 TextButton(
-                    text = "清空存档数据",
+                    text = "导出存档文件",
+                    onClick = {
+                        AppLog.i("MoreScreen", "点击：导出存档文件")
+                        appState.exportCurrentSave(context)
+                    },
+                    enabled = appState.currentXml != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    text = "清空当前存档",
                     onClick = {
                         appState.clearSave()
                         appState.saveMessage = null
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+        }
+
+        // ================= 存档历史 =================
+        SmallTitle(text = "存档历史")
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            insideMargin = PaddingValues(16.dp),
+        ) {
+            Text(
+                text = "共 ${appState.history.size} 条记录，" +
+                    "占用 ${formatSize(SaveHistory.sizeOnDisk(context))}",
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+
+            TextButton(
+                text = if (appState.showHistory) "收起历史" else "查看历史记录",
+                onClick = {
+                    appState.refreshHistory(context)
+                    appState.showHistory = !appState.showHistory
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (appState.showHistory) {
+                if (appState.history.isEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "还没有历史记录。读取一次存档后会自动保存。",
+                        fontSize = 12.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                    )
+                } else {
+                    Spacer(Modifier.height(6.dp))
+                    appState.history.forEach { entry ->
+                        Spacer(Modifier.height(10.dp))
+                        HistoryItem(
+                            entry = entry,
+                            isCurrent = entry.id == appState.currentHistoryId,
+                            onLoad = {
+                                AppLog.i("MoreScreen", "加载历史 ${entry.id}")
+                                val records = SaveHistory.parseRecords(context, entry.id)
+                                if (records.isEmpty()) {
+                                    appState.saveMessage = "这条历史的数据已损坏"
+                                } else {
+                                    appState.saveRecords = records
+                                    appState.saveLoaded = true
+                                    appState.currentXml = SaveHistory.readXml(context, entry.id)
+                                    appState.currentHistoryId = entry.id
+                                    appState.saveSource = entry.source
+                                    appState.b30FromSave = B30Calculator.calculate(records)
+                                    appState.saveMessage =
+                                        "已加载历史：${records.size} 条成绩"
+                                }
+                            },
+                            onExport = {
+                                AppLog.i("MoreScreen", "导出历史 ${entry.id}")
+                                val xml = SaveHistory.readXml(context, entry.id)
+                                if (xml.isNullOrBlank()) {
+                                    appState.saveMessage = "这条历史没有保存 xml 原文"
+                                } else {
+                                    appState.requestExportXml(
+                                        xml,
+                                        "phigros_save_${entry.id}.xml",
+                                    )
+                                }
+                            },
+                            onDelete = {
+                                AppLog.i("MoreScreen", "删除历史 ${entry.id}")
+                                SaveHistory.remove(context, entry.id)
+                                if (appState.currentHistoryId == entry.id) {
+                                    appState.currentHistoryId = null
+                                }
+                                appState.refreshHistory(context)
+                                appState.saveMessage = "已删除一条历史"
+                            },
+                        )
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+                    TextButton(
+                        text = "清空全部历史",
+                        onClick = {
+                            AppLog.i("MoreScreen", "清空全部历史")
+                            SaveHistory.clear(context)
+                            appState.currentHistoryId = null
+                            appState.refreshHistory(context)
+                            appState.saveMessage = "已清空全部历史"
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
 
@@ -436,10 +576,10 @@ fun MoreScreen(appState: AppState) {
         Spacer(Modifier.height(24.dp))
     }
 
-    // 导出位置选择器：状态变化时触发
+    // 导出位置选择器：状态变化时触发，用 appState 里设置的建议文件名
     if (appState.requestExportLocation) {
         appState.requestExportLocation = false
-        exportLocationPicker.launch("rks_b30.json")
+        exportLocationPicker.launch(appState.pendingExportName)
     }
 }
 
@@ -490,4 +630,74 @@ private fun B30ResultView(
             )
         }
     }
+}
+
+/** 历史列表中的一条。 */
+@Composable
+private fun HistoryItem(
+    entry: SaveHistory.Entry,
+    isCurrent: Boolean,
+    onLoad: () -> Unit,
+    onExport: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        insideMargin = PaddingValues(12.dp),
+    ) {
+        Text(
+            text = entry.timeText + if (isCurrent) "  ·  当前使用" else "",
+            fontSize = 13.sp,
+            color = if (isCurrent) {
+                MiuixTheme.colorScheme.primary
+            } else {
+                MiuixTheme.colorScheme.onSurfaceContainer
+            },
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = entry.source,
+            fontSize = 11.sp,
+            color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "${entry.recordCount} 条成绩 · ${entry.perfectCount} 首满分 · " +
+                "B30 ${formatNumber(entry.b30)}" +
+                if (entry.hasXml) "" else " · 无 xml 原文",
+            fontSize = 11.sp,
+            color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction("加载", onLoad, Modifier.weight(1f))
+            SmallAction("导出", onExport, Modifier.weight(1f), enabled = entry.hasXml)
+            SmallAction("删除", onDelete, Modifier.weight(1f))
+        }
+    }
+}
+
+/** 小号操作按钮。 */
+@Composable
+private fun SmallAction(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    TextButton(
+        text = text,
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+    )
+}
+
+/** 把字节数格式化成可读文本。 */
+private fun formatSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
+    else -> "%.2f MB".format(bytes / 1024.0 / 1024.0)
 }
