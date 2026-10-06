@@ -48,6 +48,7 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.core.ktx)
     // Miuix：小米 HyperOS 风格的 Compose Multiplatform UI 库
     implementation(libs.miuix.ui)
     implementation(libs.miuix.icons)

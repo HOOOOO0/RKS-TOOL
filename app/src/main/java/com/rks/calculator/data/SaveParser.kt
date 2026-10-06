@@ -1,6 +1,7 @@
 package com.rks.calculator.data
 
 import android.content.Context
+import com.rks.calculator.util.AppLog
 import org.json.JSONObject
 
 /**
@@ -74,7 +75,9 @@ object SaveParser {
      * @param xml 解密后的 playerprefs xml 内容
      */
     fun parse(context: Context, xml: String): Result {
+        AppLog.i("SaveParser", "开始解析，文本长度=${xml.length}")
         val table = LevelTable.load(context)
+        AppLog.i("SaveParser", "定数表已加载，共 ${table.size} 首")
         val records = ArrayList<Record>(512)
         val unmatched = LinkedHashSet<String>()
 
@@ -83,7 +86,10 @@ object SaveParser {
             val difficulty = m.groupValues[2].uppercase()
             val json = m.groupValues[3]
 
-            val obj = runCatching { JSONObject(json) }.getOrNull() ?: continue
+            val obj = runCatching { JSONObject(json) }.getOrElse {
+                AppLog.w("SaveParser", "单条成绩 JSON 解析失败：$json")
+                null
+            } ?: continue
 
             // key 的前两段就是定数表的 id
             val id = rawKey.split('.').take(2).joinToString(".")
@@ -106,9 +112,15 @@ object SaveParser {
             if (level == null) unmatched += id
         }
 
+        val matched = records.count { it.level != null }
+        AppLog.i(
+            "SaveParser",
+            "解析完成：${records.size} 条，匹配定数 $matched 条，未匹配 ${unmatched.size} 首",
+        )
+
         return Result(
             records = records,
-            matched = records.count { it.level != null },
+            matched = matched,
             unmatchedIds = unmatched.toList(),
         )
     }

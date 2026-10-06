@@ -1,5 +1,7 @@
 package com.rks.calculator.data
 
+import com.rks.calculator.util.AppLog
+
 /**
  * B30 计算。
  *
@@ -63,8 +65,11 @@ object B30Calculator {
      * @param records 存档解析出的成绩；内部自行过滤无法计算 RKS 的记录
      */
     fun calculate(records: List<SaveParser.Record>): Result {
+        AppLog.i("B30", "开始计算，输入 ${records.size} 条")
+
         // ① 所有能算出 RKS 的歌
         val all = records.filter { it.rks != null }
+        AppLog.i("B30", "可算 RKS 的 ${all.size} 条")
 
         // ② 排序取前 27
         val best = all
@@ -87,6 +92,13 @@ object B30Calculator {
         // 例如只有 28 条（1 首满分 + 27 首普通），或者只有 1 条，分母也还是 30。
         val divisor = TOTAL_SLOTS
         val b30 = (bestSum + perfectSum) / divisor
+
+        AppLog.i(
+            "B30",
+            "结果：前27=${best.size} 首（和 ${"%.4f".format(bestSum)}），" +
+                "满分=${perfects.size} 首（和 ${"%.4f".format(perfectSum)}），" +
+                "分母=$divisor，B30=${"%.4f".format(b30)}",
+        )
 
         return Result(
             best = best,

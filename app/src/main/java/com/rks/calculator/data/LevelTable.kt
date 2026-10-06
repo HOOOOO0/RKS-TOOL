@@ -1,6 +1,7 @@
 package com.rks.calculator.data
 
 import android.content.Context
+import com.rks.calculator.util.AppLog
 import org.json.JSONObject
 
 /**
@@ -36,8 +37,10 @@ object LevelTable {
         table?.let { return it }
         synchronized(this) {
             table?.let { return it }
+            AppLog.i("LevelTable", "开始加载定数表")
             val loaded = parse(context)
             table = loaded
+            AppLog.i("LevelTable", "定数表加载完成：${loaded.size} 首")
             return loaded
         }
     }

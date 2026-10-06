@@ -1,5 +1,7 @@
 package com.rks.calculator.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,21 +12,44 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rks.calculator.util.AppLog
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+private const val AUTHOR_NAME = "HOOO0_"
+private const val GITHUB_URL = "https://github.com/HOOOOO0/RKS-TOOL"
+private const val BILIBILI_URL = "https://space.bilibili.com/1098797406"
+
+/** 连点多少次开启开发者模式。 */
+private const val DEV_TAP_COUNT = 10
+
 /**
- * 关于页：工具说明、公式、致谢。
+ * 关于页。
+ *
+ * 包含：作者名、GitHub 地址、B 站主页、免责声明。
+ * 连点作者名 10 次可开启开发者模式（开始记录日志到私有目录）。
  */
 @Composable
 fun AboutScreen() {
+    val context = LocalContext.current
+    var tapCount by remember { mutableIntStateOf(0) }
+    var devEnabled by remember { mutableStateOf(AppLog.enabled) }
+    var toast by remember { mutableStateOf<String?>(null) }
+    var showLog by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -34,7 +59,7 @@ fun AboutScreen() {
     ) {
         Spacer(Modifier.height(4.dp))
 
-        // ---------- 标题区 ----------
+        // ---------- 标题 ----------
         Card(
             modifier = Modifier.fillMaxWidth(),
             insideMargin = PaddingValues(20.dp),
@@ -57,81 +82,146 @@ fun AboutScreen() {
             }
         }
 
-        // ---------- 公式 ----------
-        SmallTitle(text = "计算公式")
+        // ---------- 关于作者 ----------
+        SmallTitle(text = "关于作者")
         Card(
             modifier = Modifier.fillMaxWidth(),
             insideMargin = PaddingValues(16.dp),
         ) {
-            Text(text = "单曲 RKS", fontSize = 14.sp)
-            Spacer(Modifier.height(6.dp))
+            // 作者名：连点 10 次开启开发者模式
             Text(
-                text = "RKS = ( (100 × ACC − 55) / 45 )² × 定数",
-                fontSize = 15.sp,
+                text = AUTHOR_NAME,
+                fontSize = 16.sp,
                 color = MiuixTheme.colorScheme.primary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {
+                        tapCount++
+                        val remain = DEV_TAP_COUNT - tapCount
+                        when {
+                            remain > 3 -> Unit
+                            remain in 1..3 -> toast = "再点 $remain 次开启开发者模式"
+                            else -> {
+                                val next = !AppLog.enabled
+                                AppLog.setEnabled(context, next)
+                                devEnabled = next
+                                toast = if (next) {
+                                    "开发者模式已开启"
+                                } else {
+                                    "开发者模式已关闭"
+                                }
+                                tapCount = 0
+                            }
+                        }
+                    },
+                textAlign = TextAlign.Center,
             )
+
             Spacer(Modifier.height(14.dp))
 
-            Text(text = "反向：由目标 RKS 求 ACC", fontSize = 14.sp)
-            Spacer(Modifier.height(6.dp))
             Text(
-                text = "ACC = ( 55 + 45 × √(RKS / 定数) ) / 100",
-                fontSize = 15.sp,
-                color = MiuixTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(14.dp))
-
-            Text(
-                text = "该函数在 ACC = 55% 处取最小值 0，低于此值会「反弹」增大，" +
-                    "因此本工具在 ACC < 70% 时直接提示「别越」，不输出数值。",
-                fontSize = 12.sp,
+                text = "GitHub",
+                fontSize = 13.sp,
                 color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
             )
-        }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = GITHUB_URL,
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.primary,
+            )
 
-        // ---------- B30 ----------
-        SmallTitle(text = "B30 算法")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            insideMargin = PaddingValues(16.dp),
-        ) {
-            listOf(
-                "① 算出存档中每首歌的单曲 RKS",
-                "② 排序，取最高的 27 首",
-                "③ 把所有满分（1000000 分）的歌单独排序，取最高的 3 首",
-                "④ 把这 27 首与这 3 首的 RKS 相加，除以 30（分母固定 30，与数据条数无关）",
-            ).forEach {
-                Text(text = it, fontSize = 13.sp)
-                Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(14.dp))
+
+            Text(
+                text = "哔哩哔哩",
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = BILIBILI_URL,
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.primary,
+            )
+
+            toast?.let {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = it,
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
             }
-            Text(
-                text = "满分歌的 ACC 为 100%，代入公式后 RKS 在数值上等于定数。\n" +
-                    "两个列表相互独立：一首满分歌若同时进入前 27 名，会被计入两次。",
-                fontSize = 12.sp,
-                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
-            )
         }
 
-        // ---------- 数据来源 ----------
-        SmallTitle(text = "数据说明")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            insideMargin = PaddingValues(16.dp),
-        ) {
-            Text(
-                text = "曲目定数表内置了 327 首曲目，来自社区维护的 Phigros 曲目信息。" +
-                    "游戏更新后若出现新曲，可能出现「未匹配定数」的提示。",
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = "存档解析仅支持「已解密」的存档文件。" +
-                    "Phigros 的原始存档是加密的，本工具不包含任何解密算法。",
-                fontSize = 13.sp,
-            )
+        // ---------- 开发者模式（仅开启后显示） ----------
+        if (devEnabled) {
+            SmallTitle(text = "开发者模式")
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                insideMargin = PaddingValues(16.dp),
+            ) {
+                Text(
+                    text = "已开启，本次运行会记录日志到 App 私有目录。",
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = AppLog.logFile(context)?.absolutePath ?: "(路径不可用)",
+                    fontSize = 11.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+
+                Text(
+                    text = if (showLog) "收起日志内容" else "查看日志内容",
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { showLog = !showLog },
+                    textAlign = TextAlign.Center,
+                )
+
+                if (showLog) {
+                    Spacer(Modifier.height(10.dp))
+                    val content = AppLog.readAll(context)
+                    Text(
+                        text = content.ifBlank { "(暂无日志)" },
+                        fontSize = 10.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "清空日志",
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            AppLog.clear(context)
+                            showLog = false
+                        },
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
 
-        // ---------- 免责 ----------
+        // ---------- 免责声明 ----------
         SmallTitle(text = "免责声明")
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -142,7 +232,6 @@ fun AboutScreen() {
                     "所有数据均在本地处理，不会上传到任何服务器。",
                 fontSize = 12.sp,
                 color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
-                textAlign = TextAlign.Start,
             )
         }
 
