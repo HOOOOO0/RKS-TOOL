@@ -219,3 +219,38 @@ private fun EntryRow(
     }
     Spacer(Modifier.height(8.dp))
 }
+
+/**
+ * 通用信息弹窗：标题 + 正文 + 确定按钮。
+ *
+ * 用于「已读到存档」「解密完成」这类一次性提示。
+ */
+@Composable
+fun InfoDialog(
+    title: String,
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    OverlayDialog(
+        show = true,
+        renderInRootScaffold = false,
+        title = title,
+        onDismissRequest = onDismiss,
+        onDismissFinished = onDismiss,
+        content = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = message,
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                )
+                Spacer(Modifier.height(16.dp))
+                TextButton(
+                    text = "知道了",
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+    )
+}

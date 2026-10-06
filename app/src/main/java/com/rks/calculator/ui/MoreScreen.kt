@@ -103,6 +103,14 @@ fun MoreScreen(appState: AppState) {
 
     // ---------- 统一处理读取结果 ----------
 
+    /**
+     * 统一处理读取结果。
+     *
+     * 读到后：
+     *  1. 内容放进内存
+     *  2. 弹窗提示「已读到」
+     *  3. 若是加密的，引导去解密；若已是明文，直接算好 B30
+     */
     fun handleReadResult(
         ctx: android.content.Context,
         state: AppState,
@@ -111,45 +119,39 @@ fun MoreScreen(appState: AppState) {
         when (result) {
             is SaveReader.ReadResult.Success -> {
                 AppLog.i("MoreScreen", "读取成功 source=${result.source}")
-                state.saveSource = result.source
-                if (!SaveParser.looksDecrypted(result.xml)) {
-                    AppLog.w("MoreScreen", "档案仍是加密的")
-                    state.saveMessage = "存档已读到，但内容是加密的"
-                    state.showDecryptGuide = true
-                    return
-                }
-                runCatching { SaveParser.parse(ctx, result.xml) }.fold(
-                    onSuccess = { parsed ->
-                        state.saveRecords = parsed.records
-                        state.saveLoaded = true
-                        state.currentXml = result.xml
-                        val b30 = B30Calculator.calculate(parsed.records)
-                        state.b30FromSave = b30
 
-                        // 存一条历史
+                // 放进内存
+                state.setSaveContent(ctx, result.xml, result.source)
+
+                if (state.isPlainText) {
+                    // 明文：直接可用
+                    val n = state.saveRecords.size
+                    // 存历史
+                    val b30 = state.b30FromSave
+                    if (b30 != null) {
                         val entry = SaveHistory.add(
                             context = ctx,
                             source = result.source,
                             xml = result.xml,
-                            records = parsed.records,
+                            records = state.saveRecords,
                             b30 = b30.b30,
                         )
                         state.currentHistoryId = entry?.id
                         state.refreshHistory(ctx)
-
-                        state.saveMessage = buildString {
-                            append("读取成功：").append(parsed.records.size).append(" 条成绩")
-                            if (parsed.unmatchedIds.isNotEmpty()) {
-                                append("，").append(parsed.unmatchedIds.size).append(" 首未匹配定数")
-                            }
-                            append("（已存入历史）")
-                        }
-                    },
-                    onFailure = { e ->
-                        AppLog.e("MoreScreen", "解析失败", e)
-                        state.saveMessage = "解析失败：${e.message ?: e.javaClass.simpleName}"
-                    },
-                )
+                    }
+                    state.readSuccessInfo =
+                        "已读到存档（明文）\n\n" +
+                            "成绩记录：$n 条\n" +
+                            "来源：${result.source}\n\n" +
+                            "B30 已经算好了，可以去下面查看。"
+                } else {
+                    // 加密：提示去解密
+                    state.readSuccessInfo =
+                        "已读到存档（加密）\n\n" +
+                            "来源：${result.source}\n" +
+                            "大小：${result.xml.length} 字符\n\n" +
+                            "下一步：点下面的「解密」，解密后即可计算 B30。"
+                }
             }
 
             SaveReader.ReadResult.EmptyFile ->
@@ -157,7 +159,6 @@ fun MoreScreen(appState: AppState) {
 
             is SaveReader.ReadResult.NoPermission -> {
                 state.saveMessage = "没有读取权限：${result.detail}"
-                state.showDecryptGuide = false
             }
 
             SaveReader.ReadResult.NotFound ->
@@ -191,7 +192,7 @@ fun MoreScreen(appState: AppState) {
         }
     }
 
-    /** 权限到手之后要做的事：检查 root → 读取存档。 */
+    /** 权限到手之后要做的事：检查 root → 读取存档 → 放进内存。 */
     fun doReadSave() {
         AppLog.i("MoreScreen", "开始读取存档流程")
         appState.saveMessage = "正在检查 root 权限…"
@@ -200,7 +201,6 @@ fun MoreScreen(appState: AppState) {
             AppLog.i("MoreScreen", "hasRoot=$hasRoot")
             if (!hasRoot) {
                 appState.saveMessage = "未检测到 root 权限，无法直接读取游戏存档"
-                appState.showDecryptGuide = true
                 return@launch
             }
             appState.saveMessage = "正在读取存档…"
@@ -210,43 +210,20 @@ fun MoreScreen(appState: AppState) {
                 AppLog.e("MoreScreen", "root 读取抛异常", it)
                 SaveReader.RootResult.Error(it.message ?: "未知错误")
             }
+
             when (result) {
                 is SaveReader.RootResult.Success -> {
-                    appState.saveSource = result.path
-                    if (!SaveParser.looksDecrypted(result.xml)) {
-                        appState.saveMessage = "存档已读到，但内容是加密的"
-                        appState.showDecryptGuide = true
-                    } else {
-                        runCatching { SaveParser.parse(context, result.xml) }.fold(
-                            onSuccess = { parsed ->
-                                appState.saveRecords = parsed.records
-                                appState.saveLoaded = true
-                                appState.currentXml = result.xml
-                                val b30 = B30Calculator.calculate(parsed.records)
-                                appState.b30FromSave = b30
-                                val entry = SaveHistory.add(
-                                    context = context,
-                                    source = result.path,
-                                    xml = result.xml,
-                                    records = parsed.records,
-                                    b30 = b30.b30,
-                                )
-                                appState.currentHistoryId = entry?.id
-                                appState.refreshHistory(context)
-                                appState.saveMessage = "读取成功：${parsed.records.size} 条成绩（已存入历史）"
-                            },
-                            onFailure = { e ->
-                                AppLog.e("MoreScreen", "解析失败", e)
-                                appState.saveMessage = "解析失败：${e.message}"
-                            },
-                        )
-                    }
+                    appState.saveMessage = null
+                    // 复用统一处理：放进内存 + 弹窗提示
+                    handleReadResult(
+                        context,
+                        appState,
+                        SaveReader.ReadResult.Success(result.xml, result.path),
+                    )
                 }
 
-                SaveReader.RootResult.NoRoot -> {
+                SaveReader.RootResult.NoRoot ->
                     appState.saveMessage = "未检测到 root 权限"
-                    appState.showDecryptGuide = true
-                }
 
                 SaveReader.RootResult.FileNotFound ->
                     appState.saveMessage =
@@ -283,15 +260,22 @@ fun MoreScreen(appState: AppState) {
         }
     }
 
-    /** 执行加解密。 */
+    /**
+     * 执行加解密。
+     *
+     * 成功后：
+     *  - **解密**：明文覆盖内存 → 自动解析成绩 → 算好 B30
+     *  - **加密**：密文覆盖内存 → 记录已加密状态
+     *  - 两种情况都会弹「另存为」让用户保存结果
+     */
     fun runCrypto(direction: PhiCrypto.Direction) {
         val input = appState.currentXml
         if (input.isNullOrBlank()) {
-            appState.cryptoMessage = "请先读取存档"
+            appState.actionMessage = "请先读取存档"
             return
         }
         appState.cryptoRunning = true
-        appState.cryptoMessage = "正在${direction.label}…（需要联网，约需 3~10 秒）"
+        appState.cryptoMessage = "正在${direction.label}…（需要联网，约 3~10 秒）"
 
         scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -302,12 +286,42 @@ fun MoreScreen(appState: AppState) {
                     }
             }
             appState.cryptoRunning = false
+
             when (result) {
                 is PhiCrypto.Result.Success -> {
-                    appState.cryptoOutput = result.xml
-                    appState.cryptoMessage =
-                        "${direction.label}完成：${result.succeeded}/${result.total} 条成功"
-                    // 直接弹另存为，让用户挑位置
+                    // 结果覆盖内存
+                    when (direction) {
+                        PhiCrypto.Direction.Decrypt -> {
+                            appState.hasDecrypted = true
+                            appState.setSaveContent(
+                                context,
+                                result.xml,
+                                appState.saveSource ?: "解密结果",
+                            )
+                        }
+                        PhiCrypto.Direction.Encrypt -> {
+                            appState.hasEncrypted = true
+                            appState.currentXml = result.xml
+                            appState.isPlainText = false
+                        }
+                    }
+
+                    val okRate = "${result.succeeded}/${result.total}"
+                    appState.cryptoMessage = "${direction.label}完成：$okRate 条成功"
+
+                    appState.actionMessage = when (direction) {
+                        PhiCrypto.Direction.Decrypt ->
+                            "${direction.label}完成\n\n" +
+                                "成功：$okRate 条\n" +
+                                "成绩记录：${appState.saveRecords.size} 条\n\n" +
+                                "已放入内存，现在可以算 B30 了。"
+                        PhiCrypto.Direction.Encrypt ->
+                            "${direction.label}完成\n\n" +
+                                "成功：$okRate 条\n\n" +
+                                "加密结果已放入内存，可导出保存。"
+                    }
+
+                    // 弹另存为，让用户保存结果
                     appState.requestExportXml(
                         result.xml,
                         if (direction == PhiCrypto.Direction.Decrypt) {
@@ -317,8 +331,10 @@ fun MoreScreen(appState: AppState) {
                         },
                     )
                 }
+
                 is PhiCrypto.Result.Failure -> {
-                    appState.cryptoMessage = "${direction.label}失败：${result.message}"
+                    appState.cryptoMessage = null
+                    appState.actionMessage = "${direction.label}失败\n\n${result.message}"
                 }
             }
         }
@@ -380,7 +396,7 @@ fun MoreScreen(appState: AppState) {
             Spacer(Modifier.height(10.dp))
 
             TextButton(
-                text = "读取存档",
+                text = "读取存档（root）",
                 onClick = { startReadFlow() },
                 enabled = !appState.isReading,
                 modifier = Modifier.fillMaxWidth(),
@@ -389,7 +405,7 @@ fun MoreScreen(appState: AppState) {
             Spacer(Modifier.height(8.dp))
 
             TextButton(
-                text = "手动选择已解密的存档",
+                text = "手动选择存档文件",
                 onClick = {
                     AppLog.i("MoreScreen", "点击：手动选择存档")
                     filePicker.launch(SaveReader.PICKER_MIME_TYPES)
@@ -405,36 +421,72 @@ fun MoreScreen(appState: AppState) {
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            // 内存中的状态
+            Spacer(Modifier.height(10.dp))
+            val statusText = when {
+                !appState.hasContent -> "内存中：无内容"
+                appState.isPlainText -> "内存中：明文存档（可算 B30）"
+                else -> "内存中：加密存档（需先解密）"
+            }
+            Text(
+                text = statusText,
+                fontSize = 12.sp,
+                color = when {
+                    !appState.hasContent -> MiuixTheme.colorScheme.onSurfaceContainerVariant
+                    appState.isPlainText -> MiuixTheme.colorScheme.primary
+                    else -> MiuixTheme.colorScheme.error
+                },
+            )
+
+            if (appState.hasContent) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "大小 ${appState.currentXml?.length ?: 0} 字符" +
+                        " · 来源 ${appState.saveSource ?: "未知"}",
+                    fontSize = 11.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                )
+            }
+
+            if (appState.isPlainText) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "已解析 ${appState.saveRecords.size} 条成绩，" +
+                        "满分 ${appState.saveRecords.count { it.isPerfect }} 首",
+                    fontSize = 11.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                )
+            }
+
             appState.saveMessage?.let {
                 Spacer(Modifier.height(10.dp))
                 Text(text = it, fontSize = 12.sp, color = MiuixTheme.colorScheme.primary)
             }
 
-            if (appState.saveLoaded) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "来源：${appState.saveSource ?: "未知"}\n" +
-                        "共 ${appState.saveRecords.size} 条成绩，" +
-                        "满分 ${appState.saveRecords.count { it.isPerfect }} 首",
-                    fontSize = 12.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
-                )
-                Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
 
-                // 导出当前存档的原始 xml
-                TextButton(
-                    text = "导出存档文件",
-                    onClick = {
-                        AppLog.i("MoreScreen", "点击：导出存档文件")
-                        appState.exportCurrentSave(context)
-                    },
-                    enabled = appState.currentXml != null,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            // 导出存档文件（只要内存里有内容就能导出）
+            TextButton(
+                text = "导出存档文件",
+                onClick = {
+                    AppLog.i("MoreScreen", "点击：导出存档文件")
+                    if (!appState.hasContent) {
+                        appState.actionMessage = "内存中没有存档内容，请先读取存档。"
+                    } else {
+                        appState.requestExportXml(
+                            appState.currentXml!!,
+                            "playerprefs_current.xml",
+                        )
+                    }
+                },
+                enabled = !appState.isReading,
+                modifier = Modifier.fillMaxWidth(),
+            )
 
+            if (appState.hasContent) {
                 Spacer(Modifier.height(8.dp))
                 TextButton(
-                    text = "清空当前存档",
+                    text = "清空内存中的存档",
                     onClick = {
                         appState.clearSave()
                         appState.saveMessage = null
@@ -484,18 +536,21 @@ fun MoreScreen(appState: AppState) {
                             isCurrent = entry.id == appState.currentHistoryId,
                             onLoad = {
                                 AppLog.i("MoreScreen", "加载历史 ${entry.id}")
-                                val records = SaveHistory.parseRecords(context, entry.id)
-                                if (records.isEmpty()) {
-                                    appState.saveMessage = "这条历史的数据已损坏"
+                                val xml = SaveHistory.readXml(context, entry.id)
+                                if (xml.isNullOrBlank()) {
+                                    appState.actionMessage = "这条历史没有保存 xml 原文。"
                                 } else {
-                                    appState.saveRecords = records
-                                    appState.saveLoaded = true
-                                    appState.currentXml = SaveHistory.readXml(context, entry.id)
                                     appState.currentHistoryId = entry.id
-                                    appState.saveSource = entry.source
-                                    appState.b30FromSave = B30Calculator.calculate(records)
-                                    appState.saveMessage =
-                                        "已加载历史：${records.size} 条成绩"
+                                    // 统一入口：放进内存 + 按需解析
+                                    appState.setSaveContent(
+                                        context,
+                                        xml,
+                                        entry.source,
+                                    )
+                                    appState.actionMessage =
+                                        "已加载历史记录\n\n" +
+                                            "来源：${entry.source}\n" +
+                                            "成绩：${appState.saveRecords.size} 条"
                                 }
                             },
                             onExport = {
@@ -562,7 +617,12 @@ fun MoreScreen(appState: AppState) {
                 )
             } else {
                 Text(
-                    text = if (appState.saveLoaded) "点下面的按钮计算" else "请先在上方读取存档",
+                    text = when {
+                        !appState.hasContent -> "内存中没有存档，请先在上方读取存档"
+                        !appState.isPlainText -> "存档是加密的，请先点下方「解密」"
+                        appState.saveRecords.isEmpty() -> "没能解析出成绩，文件格式可能不对"
+                        else -> "点下面的按钮计算"
+                    },
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                 )
@@ -571,9 +631,21 @@ fun MoreScreen(appState: AppState) {
                     text = "计算 B30",
                     onClick = {
                         AppLog.i("MoreScreen", "点击：用存档算 B30")
-                        appState.b30FromSave = B30Calculator.calculate(appState.saveRecords)
+                        when {
+                            !appState.hasContent ->
+                                appState.actionMessage = "内存中没有存档，请先读取存档。"
+                            !appState.isPlainText ->
+                                appState.actionMessage =
+                                    "当前内容还是加密的，无法解析成绩。\n\n" +
+                                        "请先在下方「存档加解密」里点「解密」。"
+                            appState.saveRecords.isEmpty() ->
+                                appState.actionMessage = "没有解析出任何成绩记录。"
+                            else -> {
+                                appState.b30FromSave =
+                                    B30Calculator.calculate(appState.saveRecords)
+                            }
+                        }
                     },
-                    enabled = appState.saveLoaded && appState.saveRecords.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -621,7 +693,6 @@ fun MoreScreen(appState: AppState) {
             modifier = Modifier.fillMaxWidth(),
             insideMargin = PaddingValues(16.dp),
         ) {
-            // 实验性警告
             Text(
                 text = "⚠ 实验性功能",
                 fontSize = 13.sp,
@@ -629,42 +700,48 @@ fun MoreScreen(appState: AppState) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "加解密算法在第三方服务器（phi.yanx.us）上，" +
-                    "使用时会把你当前存档的**全部内容上传到该服务器**。" +
-                    "该服务为个人站点，随时可能变更或停止，功能可能失效。",
+                text = "加解密由第三方服务器（phi.yanx.us）完成，" +
+                    "使用时会把你内存中存档的全部内容上传到该服务器。" +
+                    "该服务为个人站点，随时可能变更或停止。",
                 fontSize = 11.sp,
                 color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
             )
             Spacer(Modifier.height(12.dp))
 
+            // 当前内容状态
             Text(
-                text = if (appState.currentXml != null) {
-                    "当前存档：已载入（${appState.currentXml!!.length} 字符）"
-                } else {
-                    "当前存档：未载入，请先读取存档"
+                text = when {
+                    !appState.hasContent -> "当前内容：无，请先读取存档"
+                    appState.isPlainText -> "当前内容：明文（已解密）"
+                    else -> "当前内容：密文（未解密）"
                 },
                 fontSize = 12.sp,
-                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                color = when {
+                    !appState.hasContent -> MiuixTheme.colorScheme.onSurfaceContainerVariant
+                    appState.isPlainText -> MiuixTheme.colorScheme.primary
+                    else -> MiuixTheme.colorScheme.error
+                },
             )
             Spacer(Modifier.height(12.dp))
 
+            // 两个按钮都可点，条件不满足时给出提示
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(
                     text = "解密",
                     onClick = {
-                        AppLog.i("MoreScreen", "点击：解密存档")
+                        AppLog.i("MoreScreen", "点击：解密")
                         runCrypto(PhiCrypto.Direction.Decrypt)
                     },
-                    enabled = !appState.cryptoRunning && appState.currentXml != null,
+                    enabled = !appState.cryptoRunning,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
                     text = "加密",
                     onClick = {
-                        AppLog.i("MoreScreen", "点击：加密存档")
+                        AppLog.i("MoreScreen", "点击：加密")
                         runCrypto(PhiCrypto.Direction.Encrypt)
                     },
-                    enabled = !appState.cryptoRunning && appState.currentXml != null,
+                    enabled = !appState.cryptoRunning,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -672,7 +749,7 @@ fun MoreScreen(appState: AppState) {
             if (appState.cryptoRunning) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "处理中，请稍候…",
+                    text = "处理中，请稍候…（需要联网）",
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.primary,
                 )

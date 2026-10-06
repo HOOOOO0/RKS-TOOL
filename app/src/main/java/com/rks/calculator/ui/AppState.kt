@@ -92,10 +92,30 @@ class AppState {
     /** 是否显示 B30 明细弹窗。 */
     var showB30Detail by mutableStateOf(false)
 
+    /** 读取成功后的提示弹窗内容；非 null 时显示。 */
+    var readSuccessInfo by mutableStateOf<String?>(null)
+
+    /** 操作结果提示（加解密等）。 */
+    var actionMessage by mutableStateOf<String?>(null)
+
     // ---------- 导出 ----------
 
-    /** 当前存档的 xml 原文（读到时保存，用于导出）。 */
+    /**
+     * **内存中的存档内容**。
+     *
+     * 未解密时是加密的 xml；解密成功后被明文覆盖。
+     * 所有后续操作（导出、加密、算 B30）都基于它。
+     */
     var currentXml: String? = null
+
+    /** 内存中的内容是否已是明文（能被解析出成绩）。 */
+    var isPlainText by mutableStateOf(false)
+
+    /** 内存中内容已成功解密过一次。 */
+    var hasDecrypted by mutableStateOf(false)
+
+    /** 内存中内容已成功加密过一次。 */
+    var hasEncrypted by mutableStateOf(false)
 
     /** 当前存档对应的历史 id（若有）。 */
     var currentHistoryId: String? = null
@@ -176,15 +196,50 @@ class AppState {
         requestExportLocation = true
     }
 
-    /** 请求导出当前存档（若有）。 */
-    fun exportCurrentSave(context: Context) {
-        val xml = SaveHistory.readXml(context, currentHistoryId ?: "") ?: currentXml
+    /** 请求导出当前内存中的存档（若有）。 */
+    fun exportCurrentSave() {
+        val xml = currentXml
         if (xml.isNullOrBlank()) {
-            saveMessage = "没有可导出的存档原文（可能来自手动解析的数据）"
+            actionMessage = "内存中没有存档内容，请先读取存档。"
             return
         }
-        requestExportXml(xml, "phigros_save_${System.currentTimeMillis()}.xml")
+        requestExportXml(xml, "playerprefs_current.xml")
     }
+
+    /**
+     * 把一份存档内容放进内存。
+     *
+     * @param xml 内容（可能是加密的，也可能是明文）
+     * @param source 来源描述
+     * @param tryParse 是否尝试解析成绩（明文字符串时才需要）
+     */
+    fun setSaveContent(
+        context: Context,
+        xml: String,
+        source: String,
+        tryParse: Boolean = true,
+    ) {
+        currentXml = xml
+        saveSource = source
+
+        if (tryParse && SaveParser.looksDecrypted(xml)) {
+            // 已经是明文，直接解析
+            isPlainText = true
+            val parsed = runCatching { SaveParser.parse(context, xml) }.getOrNull()
+            if (parsed != null) {
+                saveRecords = parsed.records
+                saveLoaded = true
+                b30FromSave = B30Calculator.calculate(parsed.records)
+            }
+        } else {
+            // 加密内容：清掉旧的成绩（否则会误以为已就绪）
+            isPlainText = false
+            saveLoaded = false
+        }
+    }
+
+    /** 内存里是否有内容。 */
+    val hasContent: Boolean get() = !currentXml.isNullOrBlank()
 
     /** 把一条计算结果加入导出列表（去重：同定数同 ACC 只留一条）。 */
     fun addEntry(entry: AppJson.SongEntry) {
@@ -202,6 +257,10 @@ class AppState {
         saveSource = null
         saveLoaded = false
         b30FromSave = null
+        currentXml = null
+        isPlainText = false
+        hasDecrypted = false
+        hasEncrypted = false
     }
 }
 

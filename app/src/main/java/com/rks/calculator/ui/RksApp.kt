@@ -80,6 +80,24 @@ fun RksApp() {
                     B30DetailDialog(result = it, onDismiss = { appState.showB30Detail = false })
                 }
             }
+
+            // 读取成功提示
+            appState.readSuccessInfo?.let { info ->
+                InfoDialog(
+                    title = "已读到存档",
+                    message = info,
+                    onDismiss = { appState.readSuccessInfo = null },
+                )
+            }
+
+            // 加解密等操作结果提示
+            appState.actionMessage?.let { msg ->
+                InfoDialog(
+                    title = "操作完成",
+                    message = msg,
+                    onDismiss = { appState.actionMessage = null },
+                )
+            }
         }
     }
 }
