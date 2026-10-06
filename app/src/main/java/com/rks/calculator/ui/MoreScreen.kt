@@ -93,27 +93,6 @@ fun MoreScreen(appState: AppState) {
         }
     }
 
-    // ---------- 手动选择存档文件 ----------
-
-    val filePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        AppLog.i("MoreScreen", "文件选择器回调 uri=$uri")
-        if (uri == null) {
-            appState.saveMessage = "没有选择文件"
-        } else {
-            scope.launch {
-                val result = runCatching {
-                    withContext(Dispatchers.IO) { SaveReader.readFromUri(context, uri) }
-                }.getOrElse {
-                    AppLog.e("MoreScreen", "读取 URI 抛异常", it)
-                    SaveReader.ReadResult.Error(it.message ?: "未知错误")
-                }
-                handleReadResult(context, appState, result)
-            }
-        }
-    }
-
     // ---------- 统一处理读取结果 ----------
 
     fun handleReadResult(
@@ -164,6 +143,27 @@ fun MoreScreen(appState: AppState) {
             is SaveReader.ReadResult.Error -> {
                 AppLog.e("MoreScreen", "读取失败：${result.message}")
                 state.saveMessage = "读取失败：${result.message}"
+            }
+        }
+    }
+
+    // ---------- 手动选择存档文件 ----------
+
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        AppLog.i("MoreScreen", "文件选择器回调 uri=$uri")
+        if (uri == null) {
+            appState.saveMessage = "没有选择文件"
+        } else {
+            scope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.IO) { SaveReader.readFromUri(context, uri) }
+                }.getOrElse {
+                    AppLog.e("MoreScreen", "读取 URI 抛异常", it)
+                    SaveReader.ReadResult.Error(it.message ?: "未知错误")
+                }
+                handleReadResult(context, appState, result)
             }
         }
     }
