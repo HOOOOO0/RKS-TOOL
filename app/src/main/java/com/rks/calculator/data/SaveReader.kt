@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
  *  3. root 直读 —— 成功率取决于设备
  *
  * 关于「读不到文件」的常见原因：
- *  - 系统文件选择器用 `*/*` 时，部分机型只显示媒体文件，`.xml` 会被隐藏
+ *  - 系统文件选择器若只用通配 MIME，部分机型只显示媒体文件，`.xml` 会被隐藏
  *    → 本工具提供 `application/xml` / `text/xml` 等多种 MIME 兜底，
  *      并提供「从 Download 自动查找」按钮绕开选择器
  *  - `content://` URI 读取失败（provider 不给权限）
