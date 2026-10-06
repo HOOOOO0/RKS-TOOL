@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rks.calculator.data.B30Calculator
+import com.rks.calculator.data.PhiCrypto
 import com.rks.calculator.data.SaveHistory
 import com.rks.calculator.data.SaveParser
 import com.rks.calculator.data.SaveReader
@@ -278,6 +279,47 @@ fun MoreScreen(appState: AppState) {
                 runtimePermLauncher.launch(perm)
             } else {
                 doReadSave()
+            }
+        }
+    }
+
+    /** 执行加解密。 */
+    fun runCrypto(direction: PhiCrypto.Direction) {
+        val input = appState.currentXml
+        if (input.isNullOrBlank()) {
+            appState.cryptoMessage = "请先读取存档"
+            return
+        }
+        appState.cryptoRunning = true
+        appState.cryptoMessage = "正在${direction.label}…（需要联网，约需 3~10 秒）"
+
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { PhiCrypto.process(input, direction) }
+                    .getOrElse {
+                        AppLog.e("MoreScreen", "加解密异常", it)
+                        PhiCrypto.Result.Failure(it.message ?: "未知错误")
+                    }
+            }
+            appState.cryptoRunning = false
+            when (result) {
+                is PhiCrypto.Result.Success -> {
+                    appState.cryptoOutput = result.xml
+                    appState.cryptoMessage =
+                        "${direction.label}完成：${result.succeeded}/${result.total} 条成功"
+                    // 直接弹另存为，让用户挑位置
+                    appState.requestExportXml(
+                        result.xml,
+                        if (direction == PhiCrypto.Direction.Decrypt) {
+                            "playerprefs_decrypted.xml"
+                        } else {
+                            "playerprefs_encrypted.xml"
+                        },
+                    )
+                }
+                is PhiCrypto.Result.Failure -> {
+                    appState.cryptoMessage = "${direction.label}失败：${result.message}"
+                }
             }
         }
     }
@@ -570,6 +612,75 @@ fun MoreScreen(appState: AppState) {
             appState.b30FromManual?.let {
                 Spacer(Modifier.height(12.dp))
                 B30ResultView(result = it, onDetail = null, onExport = null)
+            }
+        }
+
+        // ================= 加解密（实验性） =================
+        SmallTitle(text = "存档加解密（实验性）")
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            insideMargin = PaddingValues(16.dp),
+        ) {
+            // 实验性警告
+            Text(
+                text = "⚠ 实验性功能",
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "加解密算法在第三方服务器（phi.yanx.us）上，" +
+                    "使用时会把你当前存档的**全部内容上传到该服务器**。" +
+                    "该服务为个人站点，随时可能变更或停止，功能可能失效。",
+                fontSize = 11.sp,
+                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                text = if (appState.currentXml != null) {
+                    "当前存档：已载入（${appState.currentXml!!.length} 字符）"
+                } else {
+                    "当前存档：未载入，请先读取存档"
+                },
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = "解密",
+                    onClick = {
+                        AppLog.i("MoreScreen", "点击：解密存档")
+                        runCrypto(PhiCrypto.Direction.Decrypt)
+                    },
+                    enabled = !appState.cryptoRunning && appState.currentXml != null,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "加密",
+                    onClick = {
+                        AppLog.i("MoreScreen", "点击：加密存档")
+                        runCrypto(PhiCrypto.Direction.Encrypt)
+                    },
+                    enabled = !appState.cryptoRunning && appState.currentXml != null,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            if (appState.cryptoRunning) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "处理中，请稍候…",
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.primary,
+                )
+            }
+
+            appState.cryptoMessage?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(text = it, fontSize = 12.sp, color = MiuixTheme.colorScheme.primary)
             }
         }
 

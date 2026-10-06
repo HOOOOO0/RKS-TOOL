@@ -73,6 +73,17 @@ class AppState {
         history = SaveHistory.list(context)
     }
 
+    // ---------- 加解密（实验性） ----------
+
+    /** 是否正在加解密。 */
+    var cryptoRunning by mutableStateOf(false)
+
+    /** 加解密进度提示。 */
+    var cryptoMessage by mutableStateOf<String?>(null)
+
+    /** 加解密完成后待导出的内容。 */
+    var cryptoOutput: String? = null
+
     // ---------- 对话框可见性 ----------
 
     /** 是否显示「存档已加密」引导弹窗。 */
@@ -152,8 +163,7 @@ class AppState {
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
 
-    /**
-     * 请求导出存档 xml 原文。
+    // ---------- 对话框可见性 ----------
      *
      * @param xml 要导出的内容
      * @param name 建议的文件名
