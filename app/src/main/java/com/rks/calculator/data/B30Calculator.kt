@@ -1,0 +1,104 @@
+package com.rks.calculator.data
+
+/**
+ * B30 计算。
+ *
+ * 算法（严格按需求的伪代码实现）：
+ *
+ * ```text
+ * ① 把存档里所有歌曲的 RKS 算出来，放进一个列表
+ * ② 排序，取最高的 27 首
+ * ③ 把所有满分（1000000 分）的歌曲拿出来，放进另一个列表
+ * ④ 排序，取最高的 3 首
+ * ⑤ 把这 27 首和这 3 首的 RKS 全部加起来，除以 30
+ * ```
+ *
+ * 说明：
+ * - 满分歌的 ACC 是 100%，代入 RKS 公式后 `((100-55)/45)² × 定数 = 定数`，
+ *   所以它的 RKS 在数值上等于定数。这里统一按「算 RKS」处理，不设特例。
+ * - 两个列表相互独立，**不去重**：一首满分歌如果同时进了前 27 名，
+ *   它会出现在两个列表里，被计入两次（这是需求明确要求的）。
+ */
+object B30Calculator {
+
+    /** 取最高的 27 首普通成绩。 */
+    const val BEST_COUNT = 27
+
+    /** 再取最高的 3 首满分成绩。 */
+    const val PERFECT_COUNT = 3
+
+    /** 最终分母。 */
+    const val TOTAL_SLOTS = 30
+
+    /** 一首入选的歌曲。 */
+    data class Entry(
+        val record: SaveParser.Record,
+        /** 该曲的单曲 RKS。 */
+        val rks: Double,
+    )
+
+    /** 计算结果。 */
+    data class Result(
+        /** 前 27 名。 */
+        val best: List<Entry>,
+        /** 前 3 首满分。 */
+        val perfects: List<Entry>,
+        /** 前 27 名的 RKS 之和。 */
+        val bestSum: Double,
+        /** 前 3 首满分的 RKS 之和。 */
+        val perfectSum: Double,
+        /** 最终 B30。 */
+        val b30: Double,
+        /** 实际使用的分母（成绩不足时为实际数量，避免虚低）。 */
+        val divisor: Int,
+        /** 参与计算的有效成绩总数。 */
+        val validCount: Int,
+        /** 存档里满分成绩的总数。 */
+        val perfectCount: Int,
+    )
+
+    /**
+     * 计算 B30。
+     *
+     * @param records 存档解析出的成绩；内部自行过滤无法计算 RKS 的记录
+     */
+    fun calculate(records: List<SaveParser.Record>): Result {
+        // ① 所有能算出 RKS 的歌
+        val all = records.filter { it.rks != null }
+
+        // ② 排序取前 27
+        val best = all
+            .sortedByDescending { it.rks!! }
+            .take(BEST_COUNT)
+            .map { Entry(it, it.rks!!) }
+
+        // ③④ 满分歌单独拿出来，排序取前 3
+        val perfectAll = all.filter { it.isPerfect }
+        val perfects = perfectAll
+            .sortedByDescending { it.rks!! }
+            .take(PERFECT_COUNT)
+            .map { Entry(it, it.rks!!) }
+
+        // ⑤ 相加除以 30
+        val bestSum = best.sumOf { it.rks }
+        val perfectSum = perfects.sumOf { it.rks }
+
+        // 分母：标准 30；若玩家成绩太少（两个列表加起来都不够 30），
+        // 用实际数量，否则新玩家会得到虚低的数值。
+        val achievable = best.size + perfects.size
+        val divisor = if (achievable >= TOTAL_SLOTS) TOTAL_SLOTS else achievable
+
+        val b30 = if (divisor == 0) 0.0 else (bestSum + perfectSum) / divisor
+
+        return Result(
+            best = best,
+            perfects = perfects,
+            bestSum = bestSum,
+            perfectSum = perfectSum,
+            b30 = b30,
+            divisor = divisor,
+            validCount = all.size,
+            perfectCount = perfectAll.size,
+        )
+    }
+}
