@@ -163,7 +163,8 @@ class AppState {
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
 
-    // ---------- 对话框可见性 ----------
+    /**
+     * 请求导出存档 xml 原文。
      *
      * @param xml 要导出的内容
      * @param name 建议的文件名
